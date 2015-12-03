@@ -2,37 +2,17 @@
 using System.Collections.Generic;
 using System.IO;
 
-// TODO: Emit tags should all be extension methods, so AST separate from emission.
+// Main at bottom show how to call this kind of library. Just a prototype.
 
 namespace WixSharp
 {
-    public static class Extensions
-    {
-        public static void With<T>(this T input, Action<T> action)
-        {
-            action(input);
-        }
-
-        public static void Set(this object obj, params Func<string, object>[] hash)
-        {
-            foreach (Func<string, object> member in hash)
-            {
-                var propertyName = member.Method.GetParameters()[0].Name;
-                var propertyValue = member(string.Empty);
-                obj.GetType()
-                    .GetProperty(propertyName)
-                    .SetValue(obj, propertyValue, null);
-            }
-            ;
-        }
-    }
 
     public static class Constants
     {
         public static readonly WxGuid ProductGuid = new WxGuid();
     }
 
-
+    // My idea was that I could use this type to constrain which nodes can have specific types of children.
     public interface IChildOf<T>
     {
     }
@@ -43,9 +23,8 @@ namespace WixSharp
 
     public class WixLeafTag : WixTag
     {
-        // Really needed?
+        // Leaf's can't have children. This type prevents you from call EmitChildren.
     }
-
 
     public class WixNodeTag : WixTag
     {
@@ -105,8 +84,6 @@ namespace WixSharp
             Children.Add(wixPackage);
             return wixPackage;
         }
-
-
     }
 
     public class WixPackage : WixLeafTag, IChildOf<WixProduct>
@@ -115,8 +92,6 @@ namespace WixSharp
         public string InstallerVersion { get; set; }
 
     }
-
-
 
     public static class WixEmitter
     {
@@ -187,6 +162,7 @@ namespace WixSharp
             {
                 foreach (var child in node.Children)
                 {
+                    // Dynamic dispatch. Calls the correct Emit override in THIS class based on type.
                     Emit(((dynamic)child), ctx); // This can fail if you don't have an override for every time.
                 }
             }
@@ -197,7 +173,28 @@ namespace WixSharp
 
     }
 
-    internal class Program
+    public static class Extensions
+    {
+        public static void With<T>(this T input, Action<T> action)
+        {
+            action(input);
+        }
+
+        public static void Set(this object obj, params Func<string, object>[] hash)
+        {
+            foreach (Func<string, object> member in hash)
+            {
+                var propertyName = member.Method.GetParameters()[0].Name;
+                var propertyValue = member(string.Empty);
+                obj.GetType()
+                    .GetProperty(propertyName)
+                    .SetValue(obj, propertyValue, null);
+            }
+            ;
+        }
+    }
+
+    public class Program
     {
 
         private static void Main(string[] args)
