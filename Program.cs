@@ -4,6 +4,15 @@ using System.IO;
 
 // Main at bottom show how to call this kind of library. Just a prototype.
 
+// Ideas: 
+// - Use the Wix Documenation compiler to generate classes like WixProduct from XSD: https://github.com/wixtoolset/wix3/blob/develop/src/tools/wix/Xsd/wix.xsd
+// - Add methods at end to compile/link.
+// - Implement a guid hash for ID's, so hashes stay same as long as filename stays same.
+// - Hash prefix.
+// - Make an example the inherits for WixProduct for customization, like WixIisProduct.
+// - Add a validate method to check each class against XSD to make sure it has all children filled in (generated code).
+
+
 namespace WixSharp
 {
 
@@ -12,32 +21,34 @@ namespace WixSharp
         public static readonly WxGuid ProductGuid = new WxGuid();
     }
 
-    // My idea was that I could use this type to constrain which nodes can have specific types of children.
-    public interface IChildOf<T>
-    {
-    }
-
     public class WixTag
     {
+        // Or null.
+        public WixTag Parent { get; set; }
     }
 
     public class WixLeafTag : WixTag
     {
+        public WixLeafTag() 
+        {
+
+        }
+
         // Leaf's can't have children. This type prevents you from call EmitChildren.
     }
 
     public class WixNodeTag : WixTag
     {
-        public WixNodeTag() 
+        public WixNodeTag()
         {
-            Children = new List<WixTag>();
+            Custom = new List<WixRawXml>();
         }
 
-        public List<WixTag> Children { get; set; }
+        public List<WixRawXml> Custom { get; set; }
 
         public WixRawXml Add(WixRawXml raw)
         {
-            Children.Add(raw);
+            Custom.Add(raw);
             return raw;
         }
     }
@@ -45,13 +56,7 @@ namespace WixSharp
 
     public class WixDoc : WixNodeTag
     {
-        public WixProduct Add(WixProduct product)
-        {
-            Children.Add(product);
-            return product;
-        }
-
-
+        public WixProduct  Product { get; set; }
     }
 
     public class WxGuid
@@ -60,10 +65,14 @@ namespace WixSharp
 
     public class WixRawXml : WixTag
     {
+        public WixRawXml()
+        {
+        }
+
         public string InnerXml { get; set; }
     }
 
-    public class WixProduct : WixNodeTag, IChildOf<WixDoc>
+    public class WixProduct : WixNodeTag
     {
         // TBD: Need reasonable defaults.
 
@@ -79,19 +88,75 @@ namespace WixSharp
 
         public string Version { get; set; }
 
-        public WixPackage Add(WixPackage wixPackage)
-        {
-            Children.Add(wixPackage);
-            return wixPackage;
-        }
+
+        public WixPackage Package { get; set; }
     }
 
-    public class WixPackage : WixLeafTag, IChildOf<WixProduct>
+    public class WixPackage : WixLeafTag
     {
         public string Compressed { get; set; }
         public string InstallerVersion { get; set; }
+    }
+
+    // TBD: Generated code (from xsd)
+    public static class WixValidator
+    {
+        public static void Validate(this WixDoc doc)
+        {
+            var ctx = new ValidationContext(doc);
+            Validate( doc, ctx);
+
+            if (ctx.Errors.Count > 0)
+            {
+                throw new Exception( "One or more validation errors occurred.");
+            }
+
+        }
+
+        public struct ValidationError
+        {
+            public WixTag TagWithError { get; set; }
+            public WixTag ParentTagWithError { get; set; } // TBD: Could be a stack all the way to the top.
+            public string Message { get; set; }
+        }
+
+        private class ValidationContext
+        {
+            public WixDoc Root { get; private set; }
+            public WixNodeTag ParentTag { get; set; }
+            public List<ValidationError> Errors { get; set; }
+
+            public ValidationContext(WixDoc root)
+            {
+                Root = root;
+                ParentTag = null;
+                Errors = new List<ValidationError>();
+
+            }
+        }
+
+        // TBD: Simple example. This code will all be genreated.
+        private static void Validate(this WixDoc doc, ValidationContext ctx)
+        {
+            if (doc.Product == null)
+            {
+                ctx.Errors.Add(new ValidationError() {Message = "Missing product", TagWithError = doc, ParentTagWithError = doc.Parent});
+            }
+            // Drill down
+            Validate( doc.Product, ctx);
+        }
+
+        private static void Validate(this WixProduct product, ValidationContext ctx)
+        {
+            if (product.Id == null)
+            {
+                // Missing ID
+                ctx.Errors.Add(new ValidationError() { Message = "Missing product", TagWithError = product, ParentTagWithError = product.Parent });
+            }
+        }
 
     }
+
 
     public static class WixEmitter
     {
@@ -104,7 +169,7 @@ namespace WixSharp
             }
         }
 
-        public class EmitContext
+        private class EmitContext
         {
             public WixDoc Root { get; private set; }
             public WixNodeTag ParentTag { get; set; }
@@ -118,21 +183,24 @@ namespace WixSharp
             }
         }
 
-        public static void Emit(this WixRawXml rawXml, EmitContext ctx)
+        private static void Emit(this WixRawXml rawXml, EmitContext ctx)
         {
             ctx.Writer.Write(rawXml.InnerXml);
         }
 
-        public static void Emit(this WixProduct product, EmitContext ctx)
+        private static void Emit(this WixProduct product, EmitContext ctx)
         {
             ctx.Writer.Write("<product >");
 
+            Emit(product.Package, ctx);
+
+            // This is a lame way to hang some other xml off a node.
             EmitSelfChildren(product, ctx);
 
             ctx.Writer.Write("</product >");
         }
 
-        public static void Emit(this WixPackage package, EmitContext ctx)
+        private static void Emit(this WixPackage package, EmitContext ctx)
         {
             ctx.Writer.Write("<package >");
 
@@ -142,7 +210,7 @@ namespace WixSharp
             ctx.Writer.Write("</package >");
         }
 
-        public static void Emit(this WixDoc doc, EmitContext ctx)
+        private static void Emit(this WixDoc doc, EmitContext ctx)
         {
             ctx.Writer.Write("<?xml version=\"1.0\" encoding=\"utf-8\"?>");
             ctx.Writer.Write("<Wix xmlns=\"http://schemas.microsoft.com/wix/2006/wi\">");
@@ -153,14 +221,14 @@ namespace WixSharp
         }
 
 
-        public static void EmitSelfChildren(this WixNodeTag node, EmitContext ctx)
+        private static void EmitSelfChildren(this WixNodeTag node, EmitContext ctx)
         {
             var oldParent = ctx.ParentTag;
             ctx.ParentTag = node;
 
-            if (node.Children != null)
+            if (node.Custom != null)
             {
-                foreach (var child in node.Children)
+                foreach (var child in node.Custom)
                 {
                     // Dynamic dispatch. Calls the correct Emit override in THIS class based on type.
                     Emit(((dynamic)child), ctx); // This can fail if you don't have an override for every time.
@@ -200,10 +268,13 @@ namespace WixSharp
         private static void Main(string[] args)
         {
             var wix = new WixDoc();
-            var product = wix.Add(new WixProduct() {Id = Constants.ProductGuid, Language = "1033"}); // Yucky constructor.
-            var package = product.Add(new WixPackage() {});
-            product.Add(new WixRawXml() { InnerXml = @"<test />" });
+            wix.Product = new WixProduct() {Id = Constants.ProductGuid, Language = "1033"}; // Yucky constructor.
+            wix.Product.Package = new WixPackage() {};
 
+            // TBD. This may not be that useful. How do I guarantee correct order of output.
+            wix.Product.Custom.Add(new WixRawXml() { InnerXml = @"<test />" });
+
+            wix.Validate();
             wix.EmitFile(new FileInfo(@"c:\temp\test.wxs"));
 
 
