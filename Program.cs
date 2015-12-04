@@ -11,15 +11,12 @@ using System.IO;
 // - Hash prefix.
 // - Make an example the inherits for WixProduct for customization, like WixIisProduct.
 // - Add a validate method to check each class against XSD to make sure it has all children filled in (generated code).
+// - Generate DOM, emitter, and validator
+// - Read a WIX file and generate DOM code.
 
 
 namespace WixSharp
 {
-
-    public static class Constants
-    {
-        public static readonly WxGuid ProductGuid = new WxGuid();
-    }
 
     public class WixTag
     {
@@ -61,6 +58,12 @@ namespace WixSharp
 
     public class WxGuid
     {
+        public WxGuid()
+        {
+            Value = Guid.NewGuid();
+        }
+
+        public Guid Value { get; set; }
     }
 
     public class WixRawXml : WixTag
@@ -90,6 +93,11 @@ namespace WixSharp
 
 
         public WixPackage Package { get; set; }
+    }
+
+    public class WixIisProduct : WixProduct
+    {
+        // I can imagine something like this, that has many settings preconfigured for IIS.
     }
 
     public class WixPackage : WixLeafTag
@@ -264,19 +272,36 @@ namespace WixSharp
 
     public class Program
     {
+        public static class Settings
+        {
+            public static readonly WxGuid ProductGuid = new WxGuid();
+            public static readonly string Language = "1033";
+        }
 
         private static void Main(string[] args)
         {
-            var wix = new WixDoc();
-            wix.Product = new WixProduct() {Id = Constants.ProductGuid, Language = "1033"}; // Yucky constructor.
-            wix.Product.Package = new WixPackage() {};
+            // Is this really any better than writing XML? I can do loops and stuff, but...
+            var wix = new WixDoc()
+            {
+                Product = new WixProduct()
+                {
+                    Id = Settings.ProductGuid,
+                    Language = Settings.Language,
+
+                    Package = new WixPackage()
+                    {
+                    }
+                }
+            };
 
             // TBD. This may not be that useful. How do I guarantee correct order of output.
-            wix.Product.Custom.Add(new WixRawXml() { InnerXml = @"<test />" });
+            wix.Product.Custom.Add(new WixRawXml() {InnerXml = @"<test />"});
 
             wix.Validate();
             wix.EmitFile(new FileInfo(@"c:\temp\test.wxs"));
 
+            // TBD
+            // wix.CompileAndLink(flags);
 
         }
     }
